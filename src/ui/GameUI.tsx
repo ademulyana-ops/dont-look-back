@@ -4,6 +4,18 @@ import { PENDANT_SHARD_POLYGONS } from '../world/TextureGenerator';
 
 interface GameUIProps {
   snapshot: GameSnapshot;
+  walletAddress: string | null;
+  walletChainId: number | null;
+  walletBusy: boolean;
+  walletMessage: string | null;
+  submission: {
+    status: 'idle' | 'signing' | 'submitting' | 'confirming' | 'success' | 'error';
+    message: string;
+    transactionHash: string | null;
+    timeMs: number | null;
+  };
+  explorerUrl: string;
+  onConnectWallet: () => void;
   onPlay: () => void;
   onResume: () => void;
   onRestart: () => void;
@@ -13,10 +25,18 @@ interface GameUIProps {
   onToggleHudCollapsed: () => void;
   onLockPointer: () => void;
   onCloseNote: () => void;
+  onOpenLeaderboard: () => void;
 }
 
 export const GameUI: React.FC<GameUIProps> = ({
   snapshot,
+  walletAddress,
+  walletChainId,
+  walletBusy,
+  walletMessage,
+  submission,
+  explorerUrl,
+  onConnectWallet,
   onPlay,
   onResume,
   onRestart,
@@ -26,17 +46,28 @@ export const GameUI: React.FC<GameUIProps> = ({
   onToggleHudCollapsed,
   onLockPointer,
   onCloseNote,
+  onOpenLeaderboard,
 }) => {
   const formatTime = (secs: number): string => {
     const mins = Math.floor(secs / 60);
     const rem = secs % 60;
     return `${String(mins).padStart(2, '0')}:${String(rem).padStart(2, '0')}`;
   };
+  const formatRunTime = (timeMs: number): string => {
+    const minutes = Math.floor(timeMs / 60_000);
+    const seconds = Math.floor((timeMs % 60_000) / 1000);
+    const milliseconds = timeMs % 1000;
+    return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(milliseconds).padStart(3, '0')}`;
+  };
 
   const isMonsterClose =
     snapshot.mode === GameMode.PLAYING &&
     snapshot.monsterState !== MonsterState.DORMANT &&
     snapshot.monsterDistance < 7.5;
+  const isHemiWallet = walletChainId === 43111;
+  const shortWallet = walletAddress
+    ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`
+    : null;
 
   return (
     <div className="pointer-events-none fixed inset-0 z-10 flex flex-col justify-between overflow-hidden select-none">
@@ -47,6 +78,48 @@ export const GameUI: React.FC<GameUIProps> = ({
           isMonsterClose ? 'danger-vignette opacity-95' : 'vhs-vignette opacity-90'
         }`}
       />
+
+      <div className="pointer-events-auto absolute right-4 top-4 z-30 flex max-w-[calc(100vw-2rem)] flex-wrap items-center justify-end gap-2">
+        {walletAddress ? (
+          <div className="border border-zinc-700 bg-zinc-950/95 px-3 py-2 font-mono-tabular text-[10px] text-zinc-200">
+            {shortWallet}
+            <span className={`ml-2 ${isHemiWallet ? 'text-emerald-400' : 'text-red-400'}`}>
+              {isHemiWallet ? 'HEMI' : 'WRONG NETWORK'}
+            </span>
+          </div>
+        ) : (
+          <button
+            className="border border-amber-700 bg-zinc-950/95 px-3 py-2 font-mono-tabular text-[10px] tracking-wider text-amber-200 hover:bg-zinc-900 disabled:opacity-50"
+            disabled={walletBusy}
+            onClick={onConnectWallet}
+            type="button"
+          >
+            {walletBusy ? 'CONNECTING...' : 'CONNECT WALLET'}
+          </button>
+        )}
+        <button
+          className="border border-zinc-700 bg-zinc-950/95 px-3 py-2 font-mono-tabular text-[10px] tracking-wider text-zinc-200 hover:bg-zinc-900"
+          onClick={onOpenLeaderboard}
+          type="button"
+        >
+          LEADERBOARD
+        </button>
+        {walletAddress && !isHemiWallet && (
+          <button
+            className="border border-red-900 bg-zinc-950/95 px-3 py-2 font-mono-tabular text-[10px] tracking-wider text-red-300 hover:bg-zinc-900"
+            disabled={walletBusy}
+            onClick={onConnectWallet}
+            type="button"
+          >
+            SWITCH TO HEMI
+          </button>
+        )}
+        {walletMessage && (
+          <p className="w-full border border-red-900 bg-zinc-950/95 px-3 py-2 text-right text-[11px] text-red-300">
+            {walletMessage}
+          </p>
+        )}
+      </div>
 
       {/* ==================== PLAYING HUD ==================== */}
       {snapshot.mode === GameMode.PLAYING && (
@@ -353,9 +426,10 @@ export const GameUI: React.FC<GameUIProps> = ({
               <button
                 type="button"
                 onClick={onPlay}
-                className="px-8 py-3 bg-red-900 hover:bg-red-800 text-zinc-100 font-semibold text-sm tracking-widest border border-red-700 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                disabled={!walletAddress || !isHemiWallet}
+                className="px-8 py-3 bg-red-900 hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-40 text-zinc-100 font-semibold text-sm tracking-widest border border-red-700 transition-colors cursor-pointer whitespace-nowrap shrink-0"
               >
-                PLAY
+                {!walletAddress ? 'CONNECT WALLET TO PLAY' : !isHemiWallet ? 'SWITCH TO HEMI' : 'PLAY'}
               </button>
             </div>
           </div>
@@ -453,7 +527,42 @@ export const GameUI: React.FC<GameUIProps> = ({
               stepped out into the cold rain and left The Watcher behind.
             </p>
 
+            <div
+              aria-live="polite"
+              className={`mt-5 w-full border p-3 text-left text-xs ${
+                submission.status === 'error'
+                  ? 'border-red-900 bg-red-950/40 text-red-300'
+                  : submission.status === 'success'
+                    ? 'border-emerald-900 bg-emerald-950/40 text-emerald-300'
+                    : 'border-zinc-800 bg-zinc-900/60 text-zinc-300'
+              }`}
+            >
+              <p>{submission.message || 'Preparing your verified run result...'}</p>
+              {submission.timeMs !== null && (
+                <p className="mt-2 font-mono-tabular">
+                  VERIFIED TIME: {formatRunTime(submission.timeMs)}
+                </p>
+              )}
+              {submission.transactionHash && (
+                <a
+                  className="mt-2 inline-block break-all text-amber-300 underline underline-offset-2"
+                  href={`${explorerUrl}/tx/${submission.transactionHash}`}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  VIEW TRANSACTION
+                </a>
+              )}
+            </div>
+
             <div className="mt-8 flex w-full flex-col gap-3">
+              <button
+                className="w-full border border-zinc-700 bg-zinc-900 px-4 py-2.5 text-xs font-semibold tracking-widest text-zinc-200 hover:bg-zinc-800"
+                onClick={onOpenLeaderboard}
+                type="button"
+              >
+                VIEW LEADERBOARD
+              </button>
               <button
                 type="button"
                 onClick={onRestart}
